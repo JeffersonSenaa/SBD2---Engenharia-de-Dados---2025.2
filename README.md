@@ -1,5 +1,7 @@
 # Projeto de Banco de Dados 2 – Engenharia de Dados com Data Lake e PySpark
 
+Base de Dados: https://www.kaggle.com/datasets/metawave/vehicle-price-prediction
+
 ## 📌 Descrição
 
 Este projeto foi desenvolvido para a disciplina **Banco de Dados 2**, com o objetivo de aplicar conceitos de **Engenharia de Dados** utilizando um **Data Lake** e ferramentas do ecossistema **Apache Spark (PySpark)**.
