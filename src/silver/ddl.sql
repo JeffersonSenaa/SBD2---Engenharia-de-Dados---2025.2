@@ -5,25 +5,25 @@ DROP TABLE IF EXISTS silver.dim_modelo CASCADE;
 DROP TABLE IF EXISTS silver.dim_especificacao CASCADE;
 CREATE TABLE silver.dim_modelo (
     id_modelo BIGINT PRIMARY KEY NOT NULL,
-    make VARCHAR(100),
-    model VARCHAR(100),
+    make VARCHAR(13),
+    model VARCHAR(14),
     year INTEGER,  
     engine_hp INTEGER,
-    transmission VARCHAR(50),
-    fuel_type VARCHAR(50),
-    drivetrain VARCHAR(50),
-    body_type VARCHAR(50),
-    trim VARCHAR(50)
+    transmission VARCHAR(9),
+    fuel_type VARCHAR(8),
+    drivetrain VARCHAR(3),
+    body_type VARCHAR(12),
+    trim VARCHAR(7)
 );
 
 CREATE TABLE silver.dim_especificacao (
     id_especificacao BIGINT PRIMARY KEY NOT NULL,
-    exterior_color VARCHAR(50),
-    interior_color VARCHAR(50),
+    exterior_color VARCHAR(6),
+    interior_color VARCHAR(6),
     owner_count INTEGER,
-    accident_history VARCHAR(50),
-    seller_type VARCHAR(50),
-    condition VARCHAR(50),
+    accident_history VARCHAR(5),
+    seller_type VARCHAR(7),
+    condition VARCHAR(9),
     vehicle_age INTEGER
 );
 
@@ -31,10 +31,10 @@ CREATE TABLE silver.fato_veiculo (
     id_fato BIGINT PRIMARY KEY NOT NULL,
     id_modelo BIGINT NOT NULL,
     id_especificacao BIGINT NOT NULL,
-    mileage NUMERIC(10,2),
+    mileage INTEGER,
     mileage_per_year FLOAT,
     brand_popularity FLOAT,
-    price NUMERIC(10,2),
+    price FLOAT,
 
     CONSTRAINT fk_fato_modelo FOREIGN KEY (id_modelo)
         REFERENCES silver.dim_modelo (id_modelo)
