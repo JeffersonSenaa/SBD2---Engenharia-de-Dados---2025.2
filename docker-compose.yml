@@ -44,6 +44,7 @@ services:
     volumes:
       - ./scripts:/home/jovyan/work/scripts
       - ./data:/home/jovyan/work/data
+      - ./src:/home/jovyan/work/src
     networks:
       - sbd_network
     command: >
