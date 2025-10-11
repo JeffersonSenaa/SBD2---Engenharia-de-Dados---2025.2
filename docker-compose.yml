@@ -3,30 +3,72 @@ version: "3.9"
 services:
   jupyter:
     image: jupyter/pyspark-notebook:latest
-    container_name: jupyter-spark
+    container_name: jupyter
     depends_on:
-      - postgres
+      postgres:
+        condition: service_started
+      etl-init:
+        condition: service_completed_successfully
     environment:
       - POSTGRES_HOST=postgres
-      - POSTGRES_DB=sbd1
-      - POSTGRES_USER=sbd1
-      - POSTGRES_PASSWORD=sbd1
+      - POSTGRES_DB=sbd2_vehicle
+      - POSTGRES_USER=sbd2_vehicle
+      - POSTGRES_PASSWORD=sbd2_vehicle
+      - POSTGRES_PORT=5432
     volumes:
       - ./notebooks:/home/jovyan/work
+      - ./src:/home/jovyan/work/src
+      - ./scripts:/home/jovyan/work/scripts
+      - ./data:/home/jovyan/work/data
     ports:
       - "8888:8888"
+    networks:
+      - sbd_network
+    restart: unless-stopped
+    command: >
+      bash -c "pip install psycopg2-binary sqlalchemy pandas || true &&
+               start-notebook.sh --NotebookApp.token='' --NotebookApp.password='' --NotebookApp.allow_origin='*' --NotebookApp.ip='0.0.0.0'"
+
+  etl-init:
+    image: jupyter/pyspark-notebook:latest
+    container_name: etl-init
+    depends_on:
+      postgres:
+        condition: service_started
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=sbd2_vehicle
+      - POSTGRES_USER=sbd2_vehicle
+      - POSTGRES_PASSWORD=sbd2_vehicle
+      - POSTGRES_PORT=5432
+    volumes:
+      - ./scripts:/home/jovyan/work/scripts
+      - ./data:/home/jovyan/work/data
+    networks:
+      - sbd_network
+    command: >
+      bash -c "pip install psycopg2-binary sqlalchemy pandas || true &&
+               sleep 15 &&
+               python /home/jovyan/work/scripts/populate_database_simple.py"
 
   postgres:
     image: postgres:14
     container_name: postgres-db
     environment:
-      POSTGRES_USER: sbd1
-      POSTGRES_PASSWORD: sbd1
-      POSTGRES_DB: sbd1
+      POSTGRES_USER: sbd2_vehicle
+      POSTGRES_PASSWORD: sbd2_vehicle
+      POSTGRES_DB: sbd2_vehicle
     ports:
-      - "5432:5432"
+      - "5433:5432"  
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - sbd_network
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+
+networks:
+  sbd_network:
+    driver: bridge
