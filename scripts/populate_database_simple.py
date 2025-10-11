@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Popular o banco de dados a partir do CSV
-Executa automaticamente via docker-compose
+Script para popular o banco de dados a partir do CSV
+Implementa pipeline ETL: Bronze -> Silver (Star Schema)
 """
 import sys
 import os
@@ -10,7 +10,6 @@ import pandas as pd
 from datetime import datetime
 from sqlalchemy import create_engine, text
 
-# Configurações do banco
 DB_CONFIG = {
     'host': os.getenv('POSTGRES_HOST', 'localhost'),
     'port': os.getenv('POSTGRES_PORT', '5432'),
@@ -19,37 +18,53 @@ DB_CONFIG = {
     'password': os.getenv('POSTGRES_PASSWORD', 'sbd2_vehicle')
 }
 
-# Caminho do CSV
 CSV_PATH = '/home/jovyan/work/data/bronze/vehicle_price_prediction.csv'
+DDL_PATH = '/home/jovyan/work/src/silver/ddl.sql'
 
 def get_engine():
-    """Cria engine de conexão com o banco"""
-    connection_string = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+    """
+    Cria e retorna a engine SQLAlchemy para conexão com PostgreSQL
+    """
+    connection_string = (
+        f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
+        f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+    )
     return create_engine(connection_string)
 
+
 def wait_for_database(max_attempts=30, delay=5):
-    """Aguarda o banco de dados ficar disponível"""
+    """
+    Aguarda o banco de dados ficar disponív
+    """
+    print("Aguardando banco de dados...")
     for attempt in range(max_attempts):
         try:
             engine = get_engine()
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
+            print(f"✓ Banco disponível após {attempt + 1} tentativa(s)")
             return True
         except Exception as e:
             if attempt < max_attempts - 1:
                 print(f"Tentativa {attempt + 1}/{max_attempts}: Aguardando...")
                 time.sleep(delay)
     
-    print("Timeout: Banco de dados não ficou disponível")
+    print("ERRO: Timeout - banco não ficou disponível")
     return False
 
-def create_tables(engine):
-    """Cria as tabelas necessárias"""
+def create_bronze_table(engine):
+    """
+    Cria a tabela Bronze (dados brutos do CSV)
+    Esta tabela recebe os dados exatamente como estão no CSV
+    """
+    print("\n[1/4] Criando tabela Bronze...")
     
-    # Tabela Bronze (dados brutos)
-    create_bronze_table = """
-    CREATE TABLE IF NOT EXISTS vehicle_prices_bronze (
+    ddl = """
+    CREATE SCHEMA IF NOT EXISTS bronze;
+    DROP TABLE IF EXISTS bronze.vehicle_prices CASCADE;
+    CREATE TABLE IF NOT EXISTS bronze.vehicle_prices (
         id SERIAL PRIMARY KEY,
+        -- Dados do CSV (20 colunas originais)
         make VARCHAR(100),
         model VARCHAR(100),
         year INTEGER,
@@ -70,74 +85,72 @@ def create_tables(engine):
         mileage_per_year FLOAT,
         brand_popularity FLOAT,
         price FLOAT,
+        -- Metadados de ingestão
         _ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         _source_file VARCHAR(255)
     );
     """
     
-    # Tabela Silver (dados limpos)
-    create_silver_table = """
-    CREATE TABLE IF NOT EXISTS vehicle_prices_silver (
-        id SERIAL PRIMARY KEY,
-        make VARCHAR(100),
-        model VARCHAR(100),
-        year INTEGER,
-        mileage INTEGER,
-        engine_hp FLOAT,
-        transmission VARCHAR(50),
-        fuel_type VARCHAR(50),
-        drivetrain VARCHAR(50),
-        body_type VARCHAR(50),
-        exterior_color VARCHAR(50),
-        interior_color VARCHAR(50),
-        owner_count INTEGER,
-        accident_history VARCHAR(50),
-        seller_type VARCHAR(50),
-        condition VARCHAR(50),
-        trim VARCHAR(50),
-        vehicle_age INTEGER,
-        mileage_per_year FLOAT,
-        brand_popularity FLOAT,
-        price FLOAT,
-        price_category VARCHAR(50),
-        age_category VARCHAR(50),
-        mileage_category VARCHAR(50),
-        condition_score INTEGER,
-        _quality_score FLOAT,
-        _processed_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        _source_bronze_id INTEGER
-    );
-    """
-    
-    # Tabela de logs
-    create_logs_table = """
-    CREATE TABLE IF NOT EXISTS etl_logs (
-        id SERIAL PRIMARY KEY,
-        operation VARCHAR(50),
-        status VARCHAR(50),
-        records_processed INTEGER,
-        start_time TIMESTAMP,
-        end_time TIMESTAMP,
-        duration_seconds FLOAT,
-        message TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """
-    
     try:
         with engine.connect() as conn:
-            conn.execute(text(create_bronze_table))
-            conn.execute(text(create_silver_table))
-            conn.execute(text(create_logs_table))
+            conn.execute(text(ddl))
             conn.commit()
+        print("  ✓ Tabela Bronze criada")
         return True
     except Exception as e:
-        print(f"Erro ao criar tabelas: {e}")
+        print(f"  ✗ Erro ao criar tabela Bronze: {e}")
+        return False
+
+
+def create_silver_tables(engine):
+    """
+    Cria as tabelas Silver usando o arquivo DDL
+    
+    Estrutura (Star Schema):
+    - dim_modelo: informações do veículo (marca, modelo, ano, etc)
+    - dim_especificacao: especificações (cor, dono, acidentes, etc)
+    - fato_veiculo: tabela fato com métricas (preço, kilometragem, etc)
+    """
+    print("\n[2/4] Criando tabelas Silver (Star Schema)...")
+    
+    try:
+        # Ler o arquivo DDL
+        with open(DDL_PATH, 'r') as f:
+            ddl_content = f.read()
+        
+        # Executar o DDL
+        with engine.connect() as conn:
+            # Criar schema silver se não existir
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS silver"))
+            
+            # Executar cada statement do DDL
+            for statement in ddl_content.split(';'):
+                if statement.strip():
+                    conn.execute(text(statement))
+            
+            conn.commit()
+        
+        print("  Tabelas Silver criadas:")
+        print("    - silver.dim_modelo")
+        print("    - silver.dim_especificacao")
+        print("    - silver.fato_veiculo")
+        return True
+        
+    except Exception as e:
+        print(f"  Erro ao criar tabelas Silver: {e}")
         return False
 
 def load_bronze_data(engine):
-    """Carrega dados do CSV para a tabela Bronze"""
-    print("\n" + "="*60)
+    """
+    Extrai dados do CSV e carrega na tabela Bronze
+    
+    Passos:
+    1. Verifica se já existem dados
+    2. Lê o arquivo CSV
+    3. Adiciona metadados (_ingestion_timestamp, _source_file)
+    4. Insere no banco em chunks (10.000 linhas por vez)
+    """
+    print("\n[3/4] Carregando dados Bronze (CSV -> Banco)...")
     print("="*60)
     
     start_time = datetime.now()
@@ -145,43 +158,62 @@ def load_bronze_data(engine):
     try:
         # Verificar se já tem dados
         with engine.connect() as conn:
-            result = conn.execute(text("SELECT COUNT(*) FROM vehicle_prices_bronze"))
+            result = conn.execute(text("SELECT COUNT(*) FROM bronze.vehicle_prices"))
             count = result.scalar()
             if count > 0:
-                print(f"Tabela Bronze já contém {count:,} registros. Pulando inserção.")
+                print(f"  Bronze já contém {count:,} registros. Pulando.")
                 return True
         
         # Ler CSV
+        print("  Lendo CSV...")
         df = pd.read_csv(CSV_PATH)
-        print(f"CSV carregado: {len(df):,} linhas, {len(df.columns)} colunas")
+        print(f"  {len(df):,} linhas carregadas")
+        
+        # TRANSFORMAÇÃO 1: Tratar nulos em accident_history
+        # Conforme análise do notebook: 75% são nulos
+        # Decisão: preencher com 'None' (em vez de deixar NULL)
+        print("  Aplicando transformação: accident_history")
+        df['accident_history'] = df['accident_history'].fillna('None')
         
         # Adicionar metadados
         df['_ingestion_timestamp'] = datetime.now()
         df['_source_file'] = 'vehicle_price_prediction.csv'
         
-        # Inserir no banco (em chunks)
-        df.to_sql('vehicle_prices_bronze', engine, if_exists='append', index=False, chunksize=10000)
+        # Inserir no banco em chunks (melhor performance)
+        print("  Inserindo no banco...")
+        df.to_sql(
+            'vehicle_prices',
+            engine,
+            schema='bronze',
+            if_exists='append',
+            index=False,
+            chunksize=10000
+        )
         
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-        
-        print(f"   Registros: {len(df):,}")
-        print(f"   Tempo: {duration:.2f} segundos")
-        
-        # Registrar log
-        log_operation(engine, 'BRONZE_LOAD', 'SUCCESS', len(df), start_time, end_time)
+        duration = (datetime.now() - start_time).total_seconds()
+        print(f"  ✓ Bronze carregado: {len(df):,} registros em {duration:.1f}s")
         
         return True
         
     except Exception as e:
-        end_time = datetime.now()
-        print(f"Erro ao carregar dados Bronze: {e}")
-        log_operation(engine, 'BRONZE_LOAD', 'ERROR', 0, start_time, end_time, str(e))
+        print(f"  Erro: {e}")
         return False
 
 def transform_and_load_silver(engine):
-    """Transforma dados Bronze e carrega na tabela Silver"""
-    print("\n" + "="*60)
+    """
+    Processa dados Bronze e popula tabelas Silver (Star Schema)
+    
+    TRANSFORMAÇÕES:
+    ---------------
+    1. Lê dados da tabela Bronze
+    2. Cria dimensões únicas:
+       - dim_modelo: combinação única de (make, model, year, etc)
+       - dim_especificacao: combinação única de (cor, condição, etc)
+    3. Cria tabela fato referenciando as dimensões
+    
+    Isso implementa um Star Schema para análise otimizada
+    """
+    print("\n[4/4] Transformando e carregando Silver...")
     print("="*60)
     
     start_time = datetime.now()
@@ -189,220 +221,262 @@ def transform_and_load_silver(engine):
     try:
         # Verificar se já tem dados
         with engine.connect() as conn:
-            result = conn.execute(text("SELECT COUNT(*) FROM vehicle_prices_silver"))
+            result = conn.execute(text("SELECT COUNT(*) FROM silver.fato_veiculo"))
             count = result.scalar()
             if count > 0:
+                print(f"  Silver já contém {count:,} registros. Pulando.")
                 return True
         
-        # Ler dados da tabela Bronze
-        df = pd.read_sql("SELECT * FROM vehicle_prices_bronze", engine)
-        print(f"{len(df):,} registros carregados")
+        # Ler dados da Bronze
+        print("  Lendo dados Bronze...")
+        df = pd.read_sql("SELECT * FROM bronze.vehicle_prices", engine)
+        print(f"  {len(df):,} registros lidos")
         
-        # Transformações
+        # ==========================================
+        # PASSO 1: Criar dim_modelo
+        # ==========================================
+        print("\n  Criando dim_modelo...")
         
-        # 1. Tratar valores nulos em accident_history
-        df['accident_history'] = df['accident_history'].fillna('Unknown')
-        
-        # 2. Criar categorias de preço
-        def categorize_price(price):
-            if pd.isna(price):
-                return 'Unknown'
-            elif price < 15000:
-                return 'Budget'
-            elif price < 30000:
-                return 'Economy'
-            elif price < 50000:
-                return 'Mid-Range'
-            elif price < 80000:
-                return 'Premium'
-            else:
-                return 'Luxury'
-        
-        df['price_category'] = df['price'].apply(categorize_price)
-        
-        # 3. Criar categorias de idade
-        current_year = datetime.now().year
-        def categorize_age(year):
-            if pd.isna(year):
-                return 'Unknown'
-            age = current_year - year
-            if age <= 3:
-                return 'New'
-            elif age <= 7:
-                return 'Recent'
-            elif age <= 15:
-                return 'Used'
-            else:
-                return 'Old'
-        
-        df['age_category'] = df['year'].apply(categorize_age)
-        
-        # 4. Criar categorias de quilometragem
-        def categorize_mileage(miles):
-            if pd.isna(miles):
-                return 'Unknown'
-            elif miles < 30000:
-                return 'Low'
-            elif miles < 80000:
-                return 'Medium'
-            elif miles < 150000:
-                return 'High'
-            else:
-                return 'Very High'
-        
-        df['mileage_category'] = df['mileage'].apply(categorize_mileage)
-        
-        # 5. Mapear condição para score numérico
-        condition_map = {
-            'Excellent': 5,
-            'Very Good': 4,
-            'Good': 3,
-            'Fair': 2,
-            'Poor': 1
-        }
-        df['condition_score'] = df['condition'].map(condition_map).fillna(3)
-        
-        # 6. Calcular score de qualidade (0-100)
-        df['_quality_score'] = 100.0  # Começar com 100
-        df.loc[df['accident_history'] == 'Unknown', '_quality_score'] -= 10
-        df.loc[df['accident_history'] == 'Major', '_quality_score'] -= 20
-        df.loc[df['accident_history'] == 'Minor', '_quality_score'] -= 5
-        df.loc[df['condition'] == 'Poor', '_quality_score'] -= 15
-        df.loc[df['condition'] == 'Fair', '_quality_score'] -= 10
-        df.loc[df['owner_count'] > 3, '_quality_score'] -= 5
-        df.loc[df['mileage'] > 150000, '_quality_score'] -= 10
-        
-        # 7. Adicionar metadados
-        df['_processed_timestamp'] = datetime.now()
-        df['_source_bronze_id'] = df['id']
-        
-        # Remover colunas de metadados do Bronze
-        df = df.drop(columns=['_ingestion_timestamp', '_source_file'], errors='ignore')
-        
-        # Selecionar apenas colunas da tabela Silver
-        silver_columns = [
-            'make', 'model', 'year', 'mileage', 'engine_hp', 
-            'transmission', 'fuel_type', 'drivetrain', 'body_type',
-            'exterior_color', 'interior_color', 'owner_count',
-            'accident_history', 'seller_type', 'condition', 'trim',
-            'vehicle_age', 'mileage_per_year', 'brand_popularity', 'price',
-            'price_category', 'age_category', 'mileage_category',
-            'condition_score', '_quality_score', '_processed_timestamp', '_source_bronze_id'
+        # Selecionar colunas da dimensão modelo
+        dim_modelo_cols = [
+            'make', 'model', 'year', 'engine_hp',
+            'transmission', 'fuel_type', 'drivetrain',
+            'body_type', 'trim'
         ]
         
-        df_silver = df[silver_columns]
+        # Criar DataFrame com combinações únicas
+        df_dim_modelo = df[dim_modelo_cols].drop_duplicates().reset_index(drop=True)
+        
+        # Adicionar id_modelo (começando de 1)
+        df_dim_modelo.insert(0, 'id_modelo', range(1, len(df_dim_modelo) + 1))
         
         # Inserir no banco
-        df_silver.to_sql('vehicle_prices_silver', engine, if_exists='append', index=False, chunksize=10000)
+        df_dim_modelo.to_sql(
+            'dim_modelo',
+            engine,
+            schema='silver',
+            if_exists='append',
+            index=False,
+            chunksize=5000
+        )
         
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
+        print(f"  {len(df_dim_modelo):,} modelos únicos")
         
-        print(f"   Registros: {len(df_silver):,}")
-        print(f"   Tempo: {duration:.2f} segundos")
+        # ==========================================
+        # PASSO 2: Criar dim_especificacao
+        # ==========================================
+        print("\n  Criando dim_especificacao...")
         
-        # Registrar log
-        log_operation(engine, 'SILVER_LOAD', 'SUCCESS', len(df_silver), start_time, end_time)
+        # Selecionar colunas da dimensão especificação
+        dim_espec_cols = [
+            'exterior_color', 'interior_color', 'owner_count',
+            'accident_history', 'seller_type', 'condition',
+            'vehicle_age'
+        ]
+        
+        # Criar DataFrame com combinações únicas
+        df_dim_espec = df[dim_espec_cols].drop_duplicates().reset_index(drop=True)
+        
+        # Adicionar id_especificacao
+        df_dim_espec.insert(0, 'id_especificacao', range(1, len(df_dim_espec) + 1))
+        
+        # Inserir no banco
+        df_dim_espec.to_sql(
+            'dim_especificacao',
+            engine,
+            schema='silver',
+            if_exists='append',
+            index=False,
+            chunksize=5000
+        )
+        
+        print(f"  {len(df_dim_espec):,} especificações únicas")
+        
+        # ==========================================
+        # PASSO 3: Criar tabela FATO
+        # ==========================================
+        print("\n  Criando fato_veiculo...")
+        
+        # Fazer merge para obter os IDs das dimensões
+        # Juntar com dim_modelo
+        df_fato = df.merge(
+            df_dim_modelo,
+            on=dim_modelo_cols,
+            how='left'
+        )
+        
+        # Juntar com dim_especificacao
+        df_fato = df_fato.merge(
+            df_dim_espec,
+            on=dim_espec_cols,
+            how='left'
+        )
+        
+        # Selecionar apenas colunas da tabela fato
+        df_fato = df_fato[[
+            'id_modelo',
+            'id_especificacao',
+            'mileage',
+            'mileage_per_year',
+            'brand_popularity',
+            'price'
+        ]].copy()
+        
+        # Adicionar id_fato
+        df_fato.insert(0, 'id_fato', range(1, len(df_fato) + 1))
+        
+        # Inserir no banco
+        df_fato.to_sql(
+            'fato_veiculo',
+            engine,
+            schema='silver',
+            if_exists='append',
+            index=False,
+            chunksize=10000
+        )
+        
+        duration = (datetime.now() - start_time).total_seconds()
+        print(f"\n  Silver completo: {len(df_fato):,} fatos em {duration:.1f}s")
         
         return True
         
     except Exception as e:
-        end_time = datetime.now()
-        print(f"Erro ao processar dados Silver: {e}")
-        log_operation(engine, 'SILVER_LOAD', 'ERROR', 0, start_time, end_time, str(e))
+        print(f"  Erro: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
-def log_operation(engine, operation, status, records, start_time, end_time, message=""):
-    """Registra operação no log"""
-    try:
-        duration = (end_time - start_time).total_seconds()
-        log_entry = pd.DataFrame([{
-            'operation': operation,
-            'status': status,
-            'records_processed': records,
-            'start_time': start_time,
-            'end_time': end_time,
-            'duration_seconds': duration,
-            'message': message
-        }])
-        log_entry.to_sql('etl_logs', engine, if_exists='append', index=False)
-    except Exception as e:
-        print(f"Erro ao registrar log: {e}")
-
 def verify_data(engine):
-    """Verifica se os dados foram carregados corretamente"""
+    """
+    Verifica se os dados foram carregados corretamente
+    Mostra estatísticas das tabelas criadas
+    """
     print("\n" + "="*60)
+    print("VERIFICAÇÃO DE DADOS")
     print("="*60)
     
     try:
         with engine.connect() as conn:
-            # Contar Bronze
-            result = conn.execute(text("SELECT COUNT(*) FROM vehicle_prices_bronze"))
+            # Bronze
+            result = conn.execute(text("SELECT COUNT(*) FROM bronze.vehicle_prices"))
             bronze_count = result.scalar()
-            print(f"Tabela Bronze: {bronze_count:,} registros")
+            print(f"\n  Bronze: {bronze_count:,} registros")
             
-            # Contar Silver
-            result = conn.execute(text("SELECT COUNT(*) FROM vehicle_prices_silver"))
-            silver_count = result.scalar()
-            print(f"Tabela Silver: {silver_count:,} registros")
+            # Dim Modelo
+            result = conn.execute(text("SELECT COUNT(*) FROM silver.dim_modelo"))
+            modelo_count = result.scalar()
+            print(f"  Dim Modelo: {modelo_count:,} modelos únicos")
             
-            # Contar logs
-            result = conn.execute(text("SELECT COUNT(*) FROM etl_logs"))
-            logs_count = result.scalar()
-            print(f"Logs de execução: {logs_count} entradas")
+            # Dim Especificacao
+            result = conn.execute(text("SELECT COUNT(*) FROM silver.dim_especificacao"))
+            espec_count = result.scalar()
+            print(f"  Dim Especificação: {espec_count:,} especificações únicas")
             
-            # Mostrar distribuição de categorias
-            if silver_count > 0:
-                print("\nDistribuição de Categorias:")
-                result = conn.execute(text("""
-                    SELECT price_category, COUNT(*) as total 
-                    FROM vehicle_prices_silver 
-                    GROUP BY price_category 
-                    ORDER BY total DESC
-                """))
-                for row in result:
-                    print(f"   {row[0]}: {row[1]:,}")
+            # Fato
+            result = conn.execute(text("SELECT COUNT(*) FROM silver.fato_veiculo"))
+            fato_count = result.scalar()
+            print(f"  Fato Veículo: {fato_count:,} registros")
+            
+            # Estatísticas de preço
+            print("\n" + "-"*60)
+            print("ESTATÍSTICAS DE PREÇO:")
+            print("-"*60)
+            
+            result = conn.execute(text("""
+                SELECT 
+                    ROUND(AVG(price)::numeric, 2) as preco_medio,
+                    ROUND(MIN(price)::numeric, 2) as preco_minimo,
+                    ROUND(MAX(price)::numeric, 2) as preco_maximo
+                FROM silver.fato_veiculo
+            """))
+            stats = result.fetchone()
+            print(f"Preço Médio:  ${stats[0]:,.2f}")
+            print(f"Preço Mínimo: ${stats[1]:,.2f}")
+            print(f"Preço Máximo: ${stats[2]:,.2f}")
+            
+            # Top 5 marcas
+            print("\n" + "-"*60)
+            print("TOP 5 MARCAS (por volume):")
+            print("-"*60)
+            
+            result = conn.execute(text("""
+                SELECT m.make, COUNT(*) as total
+                FROM silver.fato_veiculo f
+                JOIN silver.dim_modelo m ON f.id_modelo = m.id_modelo
+                GROUP BY m.make
+                ORDER BY total DESC
+                LIMIT 5
+            """))
+            
+            for row in result:
+                print(f"  {row[0]:15s}: {row[1]:,}")
         
         return True
         
     except Exception as e:
-        print(f"Erro na verificação: {e}")
+        print(f"  Erro na verificação: {e}")
         return False
 
-
 def main():
-    print("="*60)
-    print("="*60)
-    print(f"Iniciado em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("")
+    """
+    Pipeline ETL completo:
     
-    # 1. Aguardar banco ficar disponível
+    1. Conecta ao banco
+    2. Cria tabelas Bronze e Silver
+    3. Carrega CSV -> Bronze
+    4. Transforma Bronze -> Silver (Star Schema)
+    5. Verifica resultados
+    """
+    print("="*60)
+    print("ETL: CSV -> BRONZE -> SILVER (Star Schema)")
+    print("="*60)
+    print(f"Início: {datetime.now().strftime('%H:%M:%S')}\n")
+    
+    # PASSO 1: Conectar ao banco
     if not wait_for_database():
-        print("\nFalha ao conectar com o banco de dados")
+        print("\n  FALHA: Não foi possível conectar ao banco")
         sys.exit(1)
     
-    # 2. Criar engine
     engine = get_engine()
     
-    # 3. Criar tabelas
-    if not create_tables(engine):
-        print("\nFalha ao criar tabelas")
+    # PASSO 2: Criar tabela Bronze
+    if not create_bronze_table(engine):
+        print("\n  FALHA: Erro ao criar tabela Bronze")
         sys.exit(1)
     
-    # 4. Carregar dados Bronze
+    # PASSO 3: Criar tabelas Silver
+    if not create_silver_tables(engine):
+        print("\n  FALHA: Erro ao criar tabelas Silver")
+        sys.exit(1)
+    
+    # PASSO 4: Carregar dados Bronze
     if not load_bronze_data(engine):
-        print("\nFalha ao carregar dados Bronze")
+        print("\n  FALHA: Erro ao carregar dados Bronze")
         sys.exit(1)
     
-    # 5. Transformar e carregar dados Silver
+    # PASSO 5: Transformar e carregar Silver
     if not transform_and_load_silver(engine):
-        print("\nFalha ao processar dados Silver")
+        print("\n  FALHA: Erro ao processar Silver")
         sys.exit(1)
     
-    # 6. Verificar dados
+    # PASSO 6: Verificar dados
     if not verify_data(engine):
-        print("\nVerificação dos dados apresentou problemas")
+        print("\n  Verificação apresentou problemas")
+    
+    # Sucesso!
+    print("\n" + "="*60)
+    print("  ETL CONCLUÍDO COM SUCESSO!")
+    print("="*60)
+    print(f"Fim: {datetime.now().strftime('%H:%M:%S')}")
+    print("\nEstrutura criada:")
+    print("  • bronze.vehicle_prices (1M registros)")
+    print("  • silver.dim_modelo (modelos únicos)")
+    print("  • silver.dim_especificacao (especificações únicas)")
+    print("  • silver.fato_veiculo (1M fatos)")
+    print("\nAcesse o Jupyter para análises:")
+    print("  http://localhost:8888")
+    print()
+
 
 if __name__ == "__main__":
     main()
-
