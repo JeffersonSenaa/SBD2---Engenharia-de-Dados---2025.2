@@ -6,10 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
-data/bronze/vehicle_price_prediction.csv
 
 # cvs
-src/bronze/vehicle_price_prediction.csv
+DataLayer/raw/vehicle_price_prediction.csv
 
 # Distribution / packaging
 .Python

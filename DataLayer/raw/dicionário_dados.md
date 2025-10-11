@@ -2,6 +2,7 @@
 
 | Atributo | Tipo de Dado | Descrição |
 |:-------------:|:-------------:|:-------------:|
+| Id    | BIGINT       | PK - Identificar o Veículo |
 | make  | VARCHAR(13)  | Fabricante do carro  |
 | model  | VARCHAR(14)  | Modelo específico do carro  |
 | year |Int | Ano em que o carro foi fabricado |

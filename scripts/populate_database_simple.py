@@ -18,8 +18,8 @@ DB_CONFIG = {
     'password': os.getenv('POSTGRES_PASSWORD', 'sbd2_vehicle')
 }
 
-CSV_PATH = '/home/jovyan/work/data/bronze/vehicle_price_prediction.csv'
-DDL_PATH = '/home/jovyan/work/src/silver/ddl.sql'
+CSV_PATH = '/home/jovyan/work/DataLayer/raw/vehicle_price_prediction.csv'
+DDL_PATH = '/home/jovyan/work/DataLayer/silver/ddl.sql'
 
 def get_engine():
     """
