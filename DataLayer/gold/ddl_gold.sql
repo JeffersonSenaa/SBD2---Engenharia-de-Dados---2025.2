@@ -1,65 +1,65 @@
 CREATE SCHEMA IF NOT EXISTS dw;
 
-DROP TABLE IF EXISTS dw.FATO_VEICULO CASCADE;
-DROP TABLE IF EXISTS dw.DIM_MODELO CASCADE;
-DROP TABLE IF EXISTS dw.DIM_CONDICAO CASCADE;
+DROP TABLE IF EXISTS dw.FAT_VCL CASCADE;
+DROP TABLE IF EXISTS dw.DIM_MDL CASCADE;
+DROP TABLE IF EXISTS dw.DIM_CON CASCADE;
 DROP TABLE IF EXISTS dw.DIM_COR CASCADE;
 
 CREATE TABLE dw.DIM_COR (
     SRK_cor BIGSERIAL PRIMARY KEY,
-    exterior_color VARCHAR(6),
-    interior_color VARCHAR(6)
+    ext VARCHAR(6),
+    itr VARCHAR(6)
 );
 
-CREATE TABLE dw.DIM_CONDICAO (
-    SRK_condicao BIGSERIAL PRIMARY KEY,
-    seller_type VARCHAR(7),
-    condition VARCHAR(9),
-    accident_history VARCHAR(5)
+CREATE TABLE dw.DIM_CON (
+    SRK_con BIGSERIAL PRIMARY KEY,
+    sel VARCHAR(7),
+    cnd VARCHAR(9),
+    acc VARCHAR(5)
 );
 
-CREATE TABLE dw.DIM_MODELO (
-    SRK_modelo BIGSERIAL PRIMARY KEY,
-    make VARCHAR(13),
-    model VARCHAR(14),
-    year INTEGER,
-    trim VARCHAR(7),
-    engine_hp INTEGER,
-    transmission VARCHAR(9),
-    fuel_type VARCHAR(8),
-    drivetrain VARCHAR(3),
-    body_type VARCHAR(12)
+CREATE TABLE dw.DIM_MDL (
+    SRK_mdl BIGSERIAL PRIMARY KEY,
+    mak VARCHAR(13),
+    mod VARCHAR(14),
+    yer INTEGER,
+    trm VARCHAR(7),
+    ehp INTEGER,
+    trn VARCHAR(9),
+    ful VARCHAR(8),
+    drv VARCHAR(3),
+    bdy VARCHAR(12)
 );
 
-CREATE TABLE dw.FATO_VEICULO (
-    SRK_veiculo BIGSERIAL PRIMARY KEY,
-    mileage INTEGER,
-    price FLOAT,
-    owner_count INTEGER,
-    vehicle_age INTEGER,
-    mileage_per_year FLOAT,
-    brand_popularity FLOAT,
+CREATE TABLE dw.FAT_VCL (
+    SRK_vcl BIGSERIAL PRIMARY KEY,
+    mil INTEGER,
+    prc FLOAT,
+    own INTEGER,
+    age INTEGER,
+    mpy FLOAT,
+    pop FLOAT,
     
-    SRK_modelo BIGINT NOT NULL,
-    SRK_condicao BIGINT NOT NULL,
+    SRK_mdl BIGINT NOT NULL,
+    SRK_con BIGINT NOT NULL,
     SRK_cor BIGINT NOT NULL,
     
-    CONSTRAINT SRK_FATO_VEICULO_modelo
-        FOREIGN KEY (SRK_modelo)
-        REFERENCES dw.DIM_MODELO (SRK_modelo)
+    CONSTRAINT SRK_FAT_VCL_mdl
+        FOREIGN KEY (SRK_mdl)
+        REFERENCES dw.DIM_MDL (SRK_mdl)
         ON DELETE RESTRICT,
     
-    CONSTRAINT SRK_FATO_VEICULO_condicao
-        FOREIGN KEY (SRK_condicao)
-        REFERENCES dw.DIM_CONDICAO (SRK_condicao)
+    CONSTRAINT SRK_FAT_VCL_con
+        FOREIGN KEY (SRK_con)
+        REFERENCES dw.DIM_CON (SRK_con)
         ON DELETE RESTRICT,
     
-    CONSTRAINT SRK_FATO_VEICULO_cor
+    CONSTRAINT SRK_FAT_VCL_cor
         FOREIGN KEY (SRK_cor)
         REFERENCES dw.DIM_COR (SRK_cor)
         ON DELETE RESTRICT
 );
 
-CREATE INDEX idx_fato_veiculo_modelo ON dw.FATO_VEICULO (SRK_modelo);
-CREATE INDEX idx_fato_veiculo_condicao ON dw.FATO_VEICULO (SRK_condicao);
-CREATE INDEX idx_fato_veiculo_cor ON dw.FATO_VEICULO (SRK_cor);
+CREATE INDEX idx_FAT_VCL_mdl ON dw.FAT_VCL (SRK_mdl);
+CREATE INDEX idx_FAT_VCL_con ON dw.FAT_VCL (SRK_con);
+CREATE INDEX idx_FAT_VCL_cor ON dw.FAT_VCL (SRK_cor);
